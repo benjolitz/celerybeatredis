@@ -4,12 +4,21 @@
 # Author: konglx
 # File:
 # Description:
+import logging
 from datetime import datetime
-
 try:
     import simplejson as json
 except ImportError:
     import json
+
+TYPES = {
+    'datetime': datetime,
+    'frozenset': lambda values: frozenset(values),
+    'set': lambda values: set(values),
+}
+
+
+logger = logging.getLogger(__name__)
 
 
 class DateTimeDecoder(json.JSONDecoder):
@@ -21,13 +30,15 @@ class DateTimeDecoder(json.JSONDecoder):
         if '__type__' not in d:
             return d
 
-        type = d.pop('__type__')
+        type_name = d.pop('__type__')
         try:
-            dateobj = datetime(**d)
-            return dateobj
-        except:
-            d['__type__'] = type
+            constructor = TYPES[type_name]
+            item = constructor(**d)
+        except Exception:
+            logger.exception('Unable to reify {}'.format(type_name))
+            d['__type__'] = type_name
             return d
+        return item
 
 
 class DateTimeEncoder(json.JSONEncoder):
@@ -47,6 +58,11 @@ class DateTimeEncoder(json.JSONEncoder):
                 'minute': obj.minute,
                 'second': obj.second,
                 'microsecond': obj.microsecond,
+            }
+        elif isinstance(obj, (set, frozenset)):
+            return {
+                '__type__': type(obj).__name__,
+                'values': list(obj)
             }
         else:
             return json.JSONEncoder.default(self, obj)

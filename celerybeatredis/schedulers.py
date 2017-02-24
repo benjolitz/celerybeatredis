@@ -6,22 +6,21 @@
 # of the License at http://www.apache.org/licenses/LICENSE-2.0
 import datetime
 import logging
-from functools import partial
-# we don't need simplejson, builtin json module is good enough
-import json
-from copy import deepcopy
 
-from celery.beat import Scheduler, ScheduleEntry
-from redis import StrictRedis
-from celery import current_app
-import kombu.utils
 import celery.schedules
+import kombu.utils
+from celery import current_app
+from celery.beat import Scheduler
+from redis import StrictRedis
 from redis.exceptions import LockError
 
+from .exceptions import TaskTypeError
+
 from .task import PeriodicTask
-from .exceptions import ValidationError, TaskTypeError
-from .decoder import DateTimeDecoder, DateTimeEncoder
-from .globals import logger
+
+logger = logging.getLogger(__name__)
+
+# we don't need simplejson, builtin json module is good enough
 
 
 class RedisScheduleEntry(object):
@@ -44,7 +43,7 @@ class RedisScheduleEntry(object):
                 seconds=app.conf.CELERYBEAT_MAX_LOOP_INTERVAL)
 
         # using periodic task as delegate
-        object.__setattr__(self, '_task', PeriodicTask(
+        self._task = PeriodicTask(
                 # Note : for compatibiilty with celery methods, the name of the task is actually the key in redis DB.
                 # For extra fancy fields (like a human readable name, you can leverage extrakwargs)
                 name=name,
@@ -57,24 +56,22 @@ class RedisScheduleEntry(object):
                 last_run_at=last_run_at,
                 total_run_count=total_run_count or 0,
                 **extrakwargs
-        ))
+        )
 
-        #
-        # Initializing members here and not in delegate
-        #
-
-        # The app is kept here (PeriodicTask should not need it)
-        object.__setattr__(self, 'app', app)
+        self.app = app
+        super(RedisScheduleEntry, self).__init__()
 
     # automatic delegation to PeriodicTask (easy delegate)
     def __getattr__(self, attr):
         return getattr(self._task, attr)
 
     def __setattr__(self, attr, value):
+        if attr in ('app', '_task'):
+            return super(RedisScheduleEntry, self).__setattr__(attr, value)
         # We set the attribute in the task delegate if available
-        if hasattr(self, '_task') and hasattr(self._task, attr):
-            setattr(self._task, attr, value)
-            return
+        if self._task and hasattr(self._task, attr):
+            return setattr(self._task, attr, value)
+
         # else we raise
         raise AttributeError(
                 "Attribute {attr} not found in {tasktype}".format(attr=attr,
@@ -189,7 +186,7 @@ class RedisScheduleEntry(object):
 
     @classmethod
     def from_entry(cls, scheduler_url, name, **entry):
-        options = entry.get('options') or {}
+        # options = entry.get('options') or {}  # unused variable!
         fields = dict(entry)
         fields['name'] = current_app.conf.CELERY_REDIS_SCHEDULER_KEY_PREFIX + name
         schedule = fields.pop('schedule')
@@ -254,9 +251,16 @@ class RedisScheduler(Scheduler):
         super(RedisScheduler, self).setup_schedule()
         # In case we have a preconfigured schedule
         self.update_from_dict(self.app.conf.CELERYBEAT_SCHEDULE)
+        prefix = current_app.conf.CELERY_REDIS_SCHEDULER_KEY_PREFIX
+        logger.info('Celery Schedule is {}'.format(self.app.conf.CELERYBEAT_SCHEDULE))
         for name in self.app.conf.CELERYBEAT_SCHEDULE:
-            if not self.rdb.get(name):
-                self.rdb.set(name, self.schedule[name].jsondump())
+            key = '{}{}'.format(prefix, name)
+            value = self.rdb.get(key)
+            logger.debug('Get {} -> {}'.format(key, value))
+            if not value:
+                value = self.schedule[name].jsondump()
+                logger.debug('Set {} -> {}'.format(key, value))
+                self.rdb.set(key, value)
 
     def tick(self):
         """Run a tick, that is one iteration of the scheduler.
@@ -292,8 +296,10 @@ class RedisScheduler(Scheduler):
         return d
 
     def reserve(self, entry):
-        # called when the task is about to be run (and data will be modified -> sync() will need to save it)
+        # called when the task is about to be run
+        # (and data will be modified -> sync() will need to save it)
         new_entry = super(RedisScheduler, self).reserve(entry)
+        logger.debug('RESERVE! {} -> {}'.format(self, new_entry))
         # Need to store the key of the entry, because the entry may change in the mean time.
         self._dirty.add(new_entry.name)
         return new_entry

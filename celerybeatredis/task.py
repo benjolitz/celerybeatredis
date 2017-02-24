@@ -6,7 +6,6 @@
 # of the License at http://www.apache.org/licenses/LICENSE-2.0
 import datetime
 from copy import deepcopy
-from redis import StrictRedis
 import celery
 
 try:
@@ -130,7 +129,8 @@ class PeriodicTask(object):
         tasks = rdb.keys(key_prefix + '*')
         for task_key in tasks:
             try:
-                dct = json.loads(bytes_to_str(rdb.get(task_key)), cls=DateTimeDecoder, encoding=default_encoding)
+                dct = json.loads(
+                    bytes_to_str(rdb.get(task_key)), cls=DateTimeDecoder, encoding=default_encoding)
                 # task name should always correspond to the key in redis to avoid
                 # issues arising when saving keys - we want to add information to
                 # the current key, not create a new key
@@ -203,15 +203,15 @@ class PeriodicTask(object):
             self.data = Interval(schedule.seconds)
         else:
             schedule_inst = None
-            for s in [Interval, Crontab]:
+            for s in (Interval, Crontab):
                 try:
                     schedule_inst = s(**schedule)
-                except TypeError as typexc:
+                except TypeError:
                     logger.warn("Create schedule failed. {}".format(schedule.__class__))
-                    pass
 
             if schedule_inst is None:
-                raise TaskTypeError("Schedule {s} didn't match Crontab or Interval type".format(s=schedule))
+                raise TaskTypeError(
+                    "Schedule {s} didn't match Crontab or Interval type".format(s=schedule))
             else:
                 self.data = schedule_inst
 
