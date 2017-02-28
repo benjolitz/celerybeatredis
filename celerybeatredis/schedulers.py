@@ -273,7 +273,7 @@ class RedisScheduler(Scheduler):
             except redis.exceptions.ResponseError:
                 self.rdb.delete(key)
                 signature = None
-            if not signature:
+            if signature != self.schedule[name].jsonhash():
                 self.rdb.hmset(key, {
                     'hash': self.schedule[name].jsonhash(),
                     'schedule': self.schedule[name].jsondump()
