@@ -278,23 +278,27 @@ class RedisScheduler(Scheduler):
 
     def setup_schedule(self):
         logger.info('Setup schedule called')
-        super(RedisScheduler, self).setup_schedule()
-        # In case we have a preconfigured schedule
-        self.update_from_dict(self.app.conf.CELERYBEAT_SCHEDULE)
-        prefix = current_app.conf.CELERY_REDIS_SCHEDULER_KEY_PREFIX
-        logger.info('Celery Schedule is {}'.format(self.app.conf.CELERYBEAT_SCHEDULE))
-        for name in self.app.conf.CELERYBEAT_SCHEDULE:
-            key = '{}{}'.format(prefix, name)
-            try:
-                signature = self.rdb.hget(key, 'hash')
-            except redis.exceptions.ResponseError:
-                self.rdb.delete(key)
-                signature = None
-            if not signature:
-                self.rdb.hmset(key, {
-                    'hash': self.schedule[name].jsonhash(),
-                    'schedule': self.schedule[name].jsondump()
-                    })
+        try:
+            super(RedisScheduler, self).setup_schedule()
+            # In case we have a preconfigured schedule
+            self.update_from_dict(self.app.conf.CELERYBEAT_SCHEDULE)
+            prefix = current_app.conf.CELERY_REDIS_SCHEDULER_KEY_PREFIX
+            logger.info('Celery Schedule is {}'.format(self.app.conf.CELERYBEAT_SCHEDULE))
+            for name in self.app.conf.CELERYBEAT_SCHEDULE:
+                key = '{}{}'.format(prefix, name)
+                try:
+                    signature = self.rdb.hget(key, 'hash')
+                except redis.exceptions.ResponseError:
+                    self.rdb.delete(key)
+                    signature = None
+                if not signature:
+                    self.rdb.hmset(key, {
+                        'hash': self.schedule[name].jsonhash(),
+                        'schedule': self.schedule[name].jsondump()
+                        })
+        except Exception:
+            logger.exception('wtf')
+            raise
 
     def tick(self):
         """Run a tick, that is one iteration of the scheduler.
