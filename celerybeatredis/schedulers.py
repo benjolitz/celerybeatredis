@@ -304,11 +304,6 @@ class RedisScheduler(Scheduler):
         # this will call self.maybe_due() to check if any entry is due.
         return super(RedisScheduler, self).tick()
 
-    # @catch_errors
-    # def apply_async(self, entry, publisher=None, **kwargs):
-    #     return super(RedisScheduler, self).apply_async
-    #     # Now secure a lock:
-
     @catch_errors
     def all_as_schedule(self, key_prefix=None, entry_class=None):
         logger.debug('RedisScheduler: Fetching database schedule')
@@ -325,27 +320,28 @@ class RedisScheduler(Scheduler):
     def reserve(self, entry):
         # called when the task is about to be run
         # (and data will be modified -> sync() will need to save it)
+        singleton = False
+        if isinstance(entry, RedisScheduleEntry):
+            singleton = entry.singleton
+
         logger.debug('RESERVE FROM {} ({})'.format(entry, type(entry)))
         new_entry = super(RedisScheduler, self).reserve(entry)
         logger.debug('RESERVE! {} -> {} ({})'.format(self, new_entry, type(entry)))
 
-        # if self.rdb and due.is_due and self.singleton:
-        #     logger.info('Attempting to secure an exclusive lock for {}'.format(self))
-        #     generation = self.rdb.get('crontask-{}-generation'.format(self.name) or 0)
-        #     seed = uuid.uuid4().hex
-        #     key = 'crontask-instance-{}-{}'.format(self.name, generation)
-        #     self.rdb.set(key, seed, ex=1*60*60*24, nx=True)  # Day timeout
-        #     value = self.rdb.get(key)
+        if singleton:
+            logger.info('Attempting to secure an exclusive lock for {}'.format(entry))
+            generation = self.rdb.get('crontask-{}-generation'.format(entry.name) or 0)
+            seed = uuid.uuid4().hex
+            key = 'crontask-instance-{}-{}'.format(entry.name, generation)
+            self.rdb.set(key, seed, ex=1*60*60*24, nx=True)  # Day timeout
+            value = self.rdb.get(key)
 
-        #     if value != seed:
-        #         logger.info('Unable to secure {} (Gen {}) as {} != {}'.format(
-        #             self, generation, seed, value))
-        #         return celery.schedules.schedstate(is_due=False, next=due[1])
-        #     logger.info('Running {} (Gen {})'.format(self.name, generation))
-        #     self.rdb.incr('crontask-{}-generation'.format(self.name))
-        # elif self.singleton and not self.rdb:
-        #     logger.error('No RDB connection availble to exclusive locking. Faulting!')
-        #     return celery.schedules.schedstate(is_due=False, next=due[1])
+            if value != seed:
+                logger.info('Unable to secure {} (Gen {}) as {} != {}'.format(
+                    entry, generation, seed, value))
+                return None
+            logger.info('Running {} (Gen {})'.format(entry.name, generation))
+            self.rdb.incr('crontask-{}-generation'.format(entry.name))
 
         # Need to store the key of the entry, because the entry may change in the mean time.
         self._dirty.add(new_entry.name)
