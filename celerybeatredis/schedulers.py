@@ -274,6 +274,7 @@ class RedisScheduler(Scheduler):
                 self.rdb.delete(key)
                 signature = None
             if signature != self.schedule[name].jsonhash():
+                logger.debug('Update/insert {} into Redis'.format(name))
                 self.rdb.hmset(key, {
                     'hash': self.schedule[name].jsonhash(),
                     'schedule': self.schedule[name].jsondump()
