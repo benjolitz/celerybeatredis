@@ -326,7 +326,8 @@ class RedisScheduler(Scheduler):
 
         logger.debug('RESERVE FROM {} ({})'.format(entry, type(entry)))
         new_entry = super(RedisScheduler, self).reserve(entry)
-        logger.debug('RESERVE! {} -> {} ({})'.format(self, new_entry, type(entry)))
+        logger.debug('RESERVE! {} -> {} ({}) of singleton {}'.format(
+            self, new_entry, type(entry), singleton))
 
         if singleton:
             logger.info('Attempting to secure an exclusive lock for {}'.format(entry))
