@@ -7,7 +7,6 @@
 import datetime
 import logging
 import uuid
-import functools
 
 import redis.exceptions
 
@@ -20,22 +19,11 @@ from redis.exceptions import LockError
 
 from .exceptions import TaskTypeError
 
-from .task import PeriodicTask
+from .task import PeriodicTask, catch_errors
 
 logger = logging.getLogger(__name__)
 
 # we don't need simplejson, builtin json module is good enough
-
-
-def catch_errors(func):
-    @functools.wraps(func)
-    def wrapper(*args, **kwargs):
-        try:
-            return func(*args, **kwargs)
-        except Exception:
-            logger.exception('Unhandled EXC in {}'.format(func.__name__))
-            raise
-    return wrapper
 
 
 class RedisScheduleEntry(object):

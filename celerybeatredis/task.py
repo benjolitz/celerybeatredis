@@ -5,6 +5,7 @@
 # use this file except in compliance with the License. You may obtain a copy
 # of the License at http://www.apache.org/licenses/LICENSE-2.0
 import datetime
+import functools
 import hashlib
 from copy import deepcopy
 import celery
@@ -17,6 +18,17 @@ except ImportError:
 from .decoder import DateTimeDecoder, DateTimeEncoder
 from .exceptions import TaskTypeError
 from .globals import bytes_to_str, default_encoding, logger
+
+
+def catch_errors(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception:
+            logger.exception('Unhandled EXC in {}'.format(func.__name__))
+            raise
+    return wrapper
 
 
 class Interval(object):
@@ -123,6 +135,7 @@ class PeriodicTask(object):
             setattr(self, elem, extrakwargs[elem])
 
     @staticmethod
+    @catch_errors
     def get_all_as_dict(rdb, key_prefix):
         """get all of the tasks, for best performance with large amount of tasks, return a generator
         """
@@ -160,12 +173,14 @@ class PeriodicTask(object):
         ))
     __next__ = next = _next_instance  # for 2to3
 
+    @catch_errors
     def jsondump(self):
         # must do a deepcopy using our custom iterator to choose what to save # BTJ: Why?
         # (matching external view)
         self_dict = deepcopy({k: v for k, v in iter(self) if v is not None})
         return json.dumps(self_dict, cls=DateTimeEncoder)
 
+    @catch_errors
     def jsonhash(self):
         hashed = hashlib.sha1()
         for key, value in self:
@@ -173,6 +188,7 @@ class PeriodicTask(object):
             hashed.update(str(value))
         return hashed.hexdigest()
 
+    @catch_errors
     def update(self, other):
         """
         Update values from another task.
@@ -196,6 +212,7 @@ class PeriodicTask(object):
         fmt = '{0.name}: {0.schedule}'
         return fmt.format(self)
 
+    @catch_errors
     def get_schedule(self):
         """
         schedule Interval / Crontab -> dict
@@ -203,6 +220,7 @@ class PeriodicTask(object):
         """
         return vars(self.data)
 
+    @catch_errors
     def set_schedule(self, schedule):
         """
         schedule dict -> Interval / Crontab if needed
@@ -234,6 +252,7 @@ class PeriodicTask(object):
 
     schedule = property(get_schedule, set_schedule)
 
+    @catch_errors
     def __iter__(self):
         """
         We iterate on our members a little bit specially
