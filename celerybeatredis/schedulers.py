@@ -329,7 +329,7 @@ class RedisScheduler(Scheduler):
 
         if singleton:
             logger.info('Attempting to secure an exclusive lock for {}'.format(entry))
-            generation = self.rdb.get('crontask-{}-generation'.format(entry.name) or 0)
+            generation = self.rdb.get('crontask-{}-generation'.format(entry.name)) or 0
             seed = uuid.uuid4().hex
             key = 'crontask-instance-{}-{}'.format(entry.name, generation)
             self.rdb.set(key, seed, ex=1*60*60*24, nx=True)  # Day timeout
