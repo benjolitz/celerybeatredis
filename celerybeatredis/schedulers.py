@@ -274,8 +274,10 @@ class RedisScheduler(Scheduler):
 
         # This will launch setup_schedule if not lazy
         super(RedisScheduler, self).__init__(*args, **kwargs)
+        logger.info('Scheduler ready')
 
     def setup_schedule(self):
+        logger.info('Setup schedule called')
         super(RedisScheduler, self).setup_schedule()
         # In case we have a preconfigured schedule
         self.update_from_dict(self.app.conf.CELERYBEAT_SCHEDULE)
@@ -301,6 +303,7 @@ class RedisScheduler(Scheduler):
         # need to grab all data (might have been updated) from schedule DB.
         # we need to merge it with whatever schedule was set in config, and already
         # installed default tasks
+        logger.info('Tick!')
         try:
             s = self.all_as_schedule()
             self.merge_inplace(s)
