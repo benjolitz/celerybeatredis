@@ -7,6 +7,8 @@
 import datetime
 import logging
 import uuid
+import functools
+
 import redis.exceptions
 
 import celery.schedules
@@ -23,6 +25,17 @@ from .task import PeriodicTask
 logger = logging.getLogger(__name__)
 
 # we don't need simplejson, builtin json module is good enough
+
+
+def catch_errors(func):
+    @functools.wraps(func)
+    def wrapper(*args, **kwargs):
+        try:
+            return func(*args, **kwargs)
+        except Exception:
+            logger.exception('Unhandled EXC in {}'.format(func.__name__))
+            raise
+    return wrapper
 
 
 class RedisScheduleEntry(object):
@@ -276,30 +289,28 @@ class RedisScheduler(Scheduler):
         super(RedisScheduler, self).__init__(*args, **kwargs)
         logger.info('Scheduler ready')
 
+    @catch_errors
     def setup_schedule(self):
         logger.info('Setup schedule called')
-        try:
-            super(RedisScheduler, self).setup_schedule()
-            # In case we have a preconfigured schedule
-            self.update_from_dict(self.app.conf.CELERYBEAT_SCHEDULE)
-            prefix = current_app.conf.CELERY_REDIS_SCHEDULER_KEY_PREFIX
-            logger.info('Celery Schedule is {}'.format(self.app.conf.CELERYBEAT_SCHEDULE))
-            for name in self.app.conf.CELERYBEAT_SCHEDULE:
-                key = '{}{}'.format(prefix, name)
-                try:
-                    signature = self.rdb.hget(key, 'hash')
-                except redis.exceptions.ResponseError:
-                    self.rdb.delete(key)
-                    signature = None
-                if not signature:
-                    self.rdb.hmset(key, {
-                        'hash': self.schedule[name].jsonhash(),
-                        'schedule': self.schedule[name].jsondump()
-                        })
-        except Exception:
-            logger.exception('wtf')
-            raise
+        super(RedisScheduler, self).setup_schedule()
+        # In case we have a preconfigured schedule
+        self.update_from_dict(self.app.conf.CELERYBEAT_SCHEDULE)
+        prefix = current_app.conf.CELERY_REDIS_SCHEDULER_KEY_PREFIX
+        logger.info('Celery Schedule is {}'.format(self.app.conf.CELERYBEAT_SCHEDULE))
+        for name in self.app.conf.CELERYBEAT_SCHEDULE:
+            key = '{}{}'.format(prefix, name)
+            try:
+                signature = self.rdb.hget(key, 'hash')
+            except redis.exceptions.ResponseError:
+                self.rdb.delete(key)
+                signature = None
+            if not signature:
+                self.rdb.hmset(key, {
+                    'hash': self.schedule[name].jsonhash(),
+                    'schedule': self.schedule[name].jsondump()
+                    })
 
+    @catch_errors
     def tick(self):
         """Run a tick, that is one iteration of the scheduler.
         Executes all due tasks.
@@ -324,6 +335,7 @@ class RedisScheduler(Scheduler):
         # this will call self.maybe_due() to check if any entry is due.
         return super(RedisScheduler, self).tick()
 
+    @catch_errors
     def all_as_schedule(self, key_prefix=None, entry_class=None):
         logger.debug('RedisScheduler: Fetching database schedule')
         key_prefix = key_prefix or current_app.conf.CELERY_REDIS_SCHEDULER_KEY_PREFIX
@@ -335,6 +347,7 @@ class RedisScheduler(Scheduler):
             d[key] = entry_class(**dict(task, app=self.app))
         return d
 
+    @catch_errors
     def reserve(self, entry):
         # called when the task is about to be run
         # (and data will be modified -> sync() will need to save it)
@@ -344,6 +357,7 @@ class RedisScheduler(Scheduler):
         self._dirty.add(new_entry.name)
         return new_entry
 
+    @catch_errors
     def sync(self):
         logger.info('Writing modified entries...')
         _tried = set()
@@ -358,6 +372,7 @@ class RedisScheduler(Scheduler):
             self._dirty |= _tried
             logger.error('Error while sync: %r', exc, exc_info=1)
 
+    @catch_errors
     def close(self):
         try:
             self._lock.release()
