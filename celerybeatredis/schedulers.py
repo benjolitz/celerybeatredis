@@ -46,9 +46,6 @@ class RedisScheduleEntry(object):
         # Setting a default time a bit before now to not miss a task that was just added.
         last_run_at = last_run_at or app.now() - datetime.timedelta(
                 seconds=app.conf.CELERYBEAT_MAX_LOOP_INTERVAL)
-        self.singleton = False
-        if 'singleton' in extrakwargs:
-            self.singleton = extrakwargs.pop('singleton')
 
         # using periodic task as delegate
         self._task = PeriodicTask(

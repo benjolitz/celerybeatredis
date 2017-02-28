@@ -78,6 +78,7 @@ class PeriodicTask(object):
     task = None
 
     data = None
+    singleton = False
 
     args = []
     kwargs = {}
