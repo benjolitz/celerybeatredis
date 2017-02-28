@@ -1,2 +1,3 @@
 *.pyc
 .*
+celerybeat_redis.egg-info/

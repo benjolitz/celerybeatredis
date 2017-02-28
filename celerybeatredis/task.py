@@ -5,9 +5,10 @@
 # use this file except in compliance with the License. You may obtain a copy
 # of the License at http://www.apache.org/licenses/LICENSE-2.0
 import datetime
+import hashlib
 from copy import deepcopy
 import celery
-
+import redis.exceptions
 try:
     import simplejson as json
 except ImportError:
@@ -130,12 +131,20 @@ class PeriodicTask(object):
         for task_key in tasks:
             try:
                 dct = json.loads(
-                    bytes_to_str(rdb.get(task_key)), cls=DateTimeDecoder, encoding=default_encoding)
+                    bytes_to_str(rdb.hmget(task_key, 'schedule')),
+                    cls=DateTimeDecoder, encoding=default_encoding)
                 # task name should always correspond to the key in redis to avoid
                 # issues arising when saving keys - we want to add information to
                 # the current key, not create a new key
                 # logger.warning('json task {0}'.format(dct))
                 yield task_key, dct
+            except redis.exceptions.ResponseError as e:
+                if str(e).startswith('WRONGTYPE'):
+                    logger.error(
+                        '{} contains incorrect data structure. Destroying.'.format(task_key))
+                    rdb.delete(task_key)
+                    continue
+                raise
             except json.JSONDecodeError:  # handling bad json format by ignoring the task
                 logger.warning('ERROR Reading json task at %s', task_key)
 
@@ -152,9 +161,17 @@ class PeriodicTask(object):
     __next__ = next = _next_instance  # for 2to3
 
     def jsondump(self):
-        # must do a deepcopy using our custom iterator to choose what to save (matching external view)
+        # must do a deepcopy using our custom iterator to choose what to save # BTJ: Why?
+        # (matching external view)
         self_dict = deepcopy({k: v for k, v in iter(self) if v is not None})
         return json.dumps(self_dict, cls=DateTimeEncoder)
+
+    def jsonhash(self):
+        hashed = hashlib.sha1()
+        for key, value in self:
+            hashed.update(key)
+            hashed.update(str(value))
+        return hashed.hexdigest()
 
     def update(self, other):
         """
@@ -224,8 +241,10 @@ class PeriodicTask(object):
         => rdb is hidden
         :return:
         """
-        for k, v in vars(self).iteritems():
-            if k == 'data':
-                yield 'schedule', self.schedule
-            else:  # we can expose everything else
-                yield k, v
+        data = dict(vars(self))
+        if 'data' in data:
+            del data['data']
+            data['schedule'] = self.schedule
+        keys = sorted(data)
+        for key in keys:
+            yield key, data[key]

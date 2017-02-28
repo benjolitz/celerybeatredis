@@ -6,6 +6,8 @@
 # of the License at http://www.apache.org/licenses/LICENSE-2.0
 import datetime
 import logging
+import uuid
+import redis.exceptions
 
 import celery.schedules
 import kombu.utils
@@ -27,10 +29,12 @@ class RedisScheduleEntry(object):
     """
     The Schedule Entry class is mainly here to handle the celery dependency injection
      and delegates everything to a PeriodicTask instance
-    It follows the Adapter Design pattern, trivially implemented in python with __getattr__ and __setattr__
+    It follows the Adapter Design pattern, trivially implemented in python with __getattr__
+        and __setattr__
     This is similar to https://github.com/celery/django-celery/blob/master/djcelery/schedulers.py
      that uses SQLAlchemy DBModels as delegates.
     """
+    rdb = None
 
     def __init__(self, name=None, task=None, enabled=True, last_run_at=None,
                  total_run_count=None, schedule=None, args=(), kwargs=None,
@@ -41,10 +45,15 @@ class RedisScheduleEntry(object):
         # Setting a default time a bit before now to not miss a task that was just added.
         last_run_at = last_run_at or app.now() - datetime.timedelta(
                 seconds=app.conf.CELERYBEAT_MAX_LOOP_INTERVAL)
+        self.singleton = False
+        if 'singleton' in extrakwargs:
+            self.singleton = extrakwargs.pop('singleton')
+            print(self.singleton)
 
         # using periodic task as delegate
         self._task = PeriodicTask(
-                # Note : for compatibiilty with celery methods, the name of the task is actually the key in redis DB.
+                # Note : for compatibiilty with celery methods, the name of the task is
+                # actually the key in redis DB.
                 # For extra fancy fields (like a human readable name, you can leverage extrakwargs)
                 name=name,
                 task=task,
@@ -66,7 +75,7 @@ class RedisScheduleEntry(object):
         return getattr(self._task, attr)
 
     def __setattr__(self, attr, value):
-        if attr in ('app', '_task'):
+        if attr in ('app', '_task', 'rdb'):
             return super(RedisScheduleEntry, self).__setattr__(attr, value)
         # We set the attribute in the task delegate if available
         if self._task and hasattr(self._task, attr):
@@ -78,7 +87,8 @@ class RedisScheduleEntry(object):
                                                                   tasktype=type(self._task)))
 
     #
-    # Overrides schedule accessors in PeriodicTask to store dict in json but retrieve proper celery schedules
+    # Overrides schedule accessors in PeriodicTask to store dict in json but
+    # retrieve proper celery schedules
     #
     def get_schedule(self):
         if {'every', 'period'}.issubset(self._task.schedule.keys()):
@@ -131,7 +141,24 @@ class RedisScheduleEntry(object):
             # if the task is disabled, we always return false, but the time that
             # it is next due is returned as usual
             return celery.schedules.schedstate(is_due=False, next=due[1])
+        # Now secure a lock:
+        if self.rdb and due.is_due and self.singleton:
+            logger.info('Attempting to secure an exclusive lock for {}'.format(self))
+            generation = self.rdb.get('crontask-{}-generation'.format(self.name) or 0)
+            seed = uuid.uuid4().hex
+            key = 'crontask-instance-{}-{}'.format(self.name, generation)
+            self.rdb.set(key, seed, ex=1*60*60*24, nx=True)  # Day timeout
+            value = self.rdb.get(key)
 
+            if value != seed:
+                logger.info('Unable to secure {} (Gen {}) as {} != {}'.format(
+                    self, generation, seed, value))
+                return celery.schedules.schedstate(is_due=False, next=due[1])
+            logger.info('Running {} (Gen {})'.format(self.name, generation))
+            self.rdb.incr('crontask-{}-generation'.format(self.name))
+        elif self.singleton and not self.rdb:
+            logger.error('No RDB connection availble to exclusive locking. Faulting!')
+            return celery.schedules.schedstate(is_due=False, next=due[1])
         return due
 
     def __repr__(self):
@@ -243,6 +270,7 @@ class RedisScheduler(Scheduler):
         self._lock = self.rdb.lock('celery:beat:task_lock', timeout=self.lock_ttl)
         self._lock_acquired = self._lock.acquire(blocking=False)
         self.Entry.scheduler = self
+        self.Entry.rdb = self.rdb
 
         # This will launch setup_schedule if not lazy
         super(RedisScheduler, self).__init__(*args, **kwargs)
@@ -255,19 +283,24 @@ class RedisScheduler(Scheduler):
         logger.info('Celery Schedule is {}'.format(self.app.conf.CELERYBEAT_SCHEDULE))
         for name in self.app.conf.CELERYBEAT_SCHEDULE:
             key = '{}{}'.format(prefix, name)
-            value = self.rdb.get(key)
-            logger.debug('Get {} -> {}'.format(key, value))
-            if not value:
-                value = self.schedule[name].jsondump()
-                logger.debug('Set {} -> {}'.format(key, value))
-                self.rdb.set(key, value)
+            try:
+                signature = self.rdb.hget(key, 'hash')
+            except redis.exceptions.ResponseError:
+                self.rdb.delete(key)
+                signature = None
+            if not signature:
+                self.rdb.hmset(key, {
+                    'hash': self.schedule[name].jsonhash(),
+                    'schedule': self.schedule[name].jsondump()
+                    })
 
     def tick(self):
         """Run a tick, that is one iteration of the scheduler.
         Executes all due tasks.
         """
         # need to grab all data (might have been updated) from schedule DB.
-        # we need to merge it with whatever schedule was set in config, and already installed default tasks
+        # we need to merge it with whatever schedule was set in config, and already
+        # installed default tasks
         try:
             s = self.all_as_schedule()
             self.merge_inplace(s)
@@ -326,7 +359,8 @@ class RedisScheduler(Scheduler):
         self.sync()
 
     def __del__(self):
-        # celery beat will create Scheduler twice, first time create then destroy it, so we need release lock here
+        # celery beat will create Scheduler twice, first time create then destroy it,
+        # so we need release lock here
         try:
             self._lock.release()
         except LockError:

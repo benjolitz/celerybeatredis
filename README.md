@@ -1,3 +1,7 @@
+# About this fork
+
+This project has been forked off and will have bugfixes necessary for continued use in a Celery 3.x cluster.
+
 # Project Status
 
 Because of the busy of work, I doesn't got much time on this time, and one major reason is now I am programming with Java...
