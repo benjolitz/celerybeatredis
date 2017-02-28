@@ -78,7 +78,6 @@ class PeriodicTask(object):
     task = None
 
     data = None
-    singleton = False
 
     args = []
     kwargs = {}
@@ -130,6 +129,7 @@ class PeriodicTask(object):
         self.delete_key = 'deleted:' + bytes_to_str(self.key)
 
         self.running = False
+        self.singleton = kwargs.get('singleton', False)
 
         # storing extra arguments (might be useful to have other args depending on application)
         for elem in extrakwargs.keys():
@@ -182,6 +182,7 @@ class PeriodicTask(object):
         # must do a deepcopy using our custom iterator to choose what to save # BTJ: Why?
         # (matching external view)
         self_dict = deepcopy({k: v for k, v in iter(self) if v is not None})
+        logger.debug('Json dump! {}'.format(self_dict))
         return json.dumps(self_dict, cls=DateTimeEncoder)
 
     @catch_errors
