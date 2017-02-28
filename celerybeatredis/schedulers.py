@@ -304,10 +304,10 @@ class RedisScheduler(Scheduler):
         # this will call self.maybe_due() to check if any entry is due.
         return super(RedisScheduler, self).tick()
 
-    @catch_errors
-    def apply_async(self, entry, publisher=None, **kwargs):
-        return super(RedisScheduler, self).apply_async
-        # Now secure a lock:
+    # @catch_errors
+    # def apply_async(self, entry, publisher=None, **kwargs):
+    #     return super(RedisScheduler, self).apply_async
+    #     # Now secure a lock:
 
     @catch_errors
     def all_as_schedule(self, key_prefix=None, entry_class=None):
