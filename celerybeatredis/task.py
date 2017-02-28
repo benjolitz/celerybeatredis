@@ -143,8 +143,9 @@ class PeriodicTask(object):
         tasks = rdb.keys(key_prefix + '*')
         for task_key in tasks:
             try:
+                value, = rdb.hmget(task_key, 'schedule')
                 dct = json.loads(
-                    bytes_to_str(rdb.hmget(task_key, 'schedule')),
+                    bytes_to_str(value),
                     cls=DateTimeDecoder, encoding=default_encoding)
                 # task name should always correspond to the key in redis to avoid
                 # issues arising when saving keys - we want to add information to
@@ -160,6 +161,8 @@ class PeriodicTask(object):
                 raise
             except json.JSONDecodeError:  # handling bad json format by ignoring the task
                 logger.warning('ERROR Reading json task at %s', task_key)
+            except ValueError:
+                logger.warning('Unable to decode data at {}. Possibly deleted'.format(task_key))
 
     def _next_instance(self, last_run_at):
         self.last_run_at = last_run_at
