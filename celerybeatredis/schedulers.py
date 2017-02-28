@@ -75,7 +75,7 @@ class RedisScheduleEntry(object):
         return getattr(self._task, attr)
 
     def __setattr__(self, attr, value):
-        if attr in ('app', '_task', 'rdb'):
+        if attr in ('app', '_task', 'rdb', 'singleton'):
             return super(RedisScheduleEntry, self).__setattr__(attr, value)
         # We set the attribute in the task delegate if available
         if self._task and hasattr(self._task, attr):
