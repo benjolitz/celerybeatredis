@@ -8,6 +8,7 @@ import datetime
 import logging
 import time
 import uuid
+import threading
 
 import redis.exceptions
 
@@ -357,6 +358,10 @@ class RedisScheduler(Scheduler):
             @catch_errors
             def callback(result):
                 logger.info('Callback on {}'.format(entry.name))
+                try:
+                    result.get()
+                except Exception:
+                    logger.exception('Error in {}'.format(entry.name))
                 if 0.1 < time.time() - t_s < 5:
                     time.sleep(5 - t_s)
                 self.rdb.incr('crontask-{}-generation'.format(entry.name))
@@ -365,7 +370,8 @@ class RedisScheduler(Scheduler):
             entry, producer=producer, advance=advance, **kwargs)
         if callback:
             logger.info('Attaching callback for {}'.format(entry.name))
-            result.then(callback)
+            t = threading.Thread(target=callback)
+            t.start()
         return result
 
     @catch_errors
