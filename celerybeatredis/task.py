@@ -143,6 +143,9 @@ class PeriodicTask(object):
             try:
                 value, = rdb.hmget(task_key, 'schedule')
                 logger.debug('Loading {}'.format(task_key))
+                if value is None:
+                    logger.debug('{} was erased!'.format(task_key))
+                    continue
                 dct = json.loads(
                     bytes_to_str(value),
                     cls=DateTimeDecoder, encoding=default_encoding)

@@ -347,7 +347,7 @@ class RedisScheduler(Scheduler):
             value = self.rdb.get(key)
 
             if value != seed:
-                logger.info('Unable to secure {} (Gen {}) as {} != {}'.format(
+                logger.debug('Unable to secure {} (Gen {}) as {} != {}'.format(
                     entry.name, generation, seed, value))
                 return EmptyResult()
 
@@ -356,6 +356,7 @@ class RedisScheduler(Scheduler):
 
             @catch_errors
             def callback(result):
+                logger.info('Callback on {}'.format(entry.name))
                 if 0.1 < time.time() - t_s < 5:
                     time.sleep(5 - t_s)
                 self.rdb.incr('crontask-{}-generation'.format(entry.name))
