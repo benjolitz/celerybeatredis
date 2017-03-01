@@ -342,14 +342,14 @@ class RedisScheduler(Scheduler):
 
             if value != seed:
                 logger.info('Unable to secure {} (Gen {}) as {} != {}'.format(
-                    entry, generation, seed, value))
+                    entry.name, generation, seed, value))
                 raise ValueError('Nothing to do!')
 
             logger.info('Running {} (Gen {})'.format(entry.name, generation))
             t_s = time.time()
 
-            def callback(*args, **kwargs):
-                logger.error('Error on running task {}'.format(entry.name))
+            @catch_errors
+            def callback(result):
                 if 0.1 < time.time() - t_s < 5:
                     time.sleep(5 - t_s)
                 self.rdb.incr('crontask-{}-generation'.format(entry.name))
@@ -357,7 +357,7 @@ class RedisScheduler(Scheduler):
         result = super(RedisScheduler, self).apply_async(
             entry, producer=producer, advance=advance, **kwargs)
         if callback:
-            result.then(callback, callback)
+            result.then(callback)
         return result
 
     @catch_errors
