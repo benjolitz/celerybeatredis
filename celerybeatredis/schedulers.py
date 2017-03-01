@@ -325,7 +325,7 @@ class RedisScheduler(Scheduler):
         self._dirty.add(new_entry.name)
         return new_entry
 
-    def apply_async(self, entry, publisher=None, **kwargs):
+    def apply_async(self, entry, producer=None, advance=True, **kwargs):
         singleton = False
         callback = None
         if isinstance(entry, RedisScheduleEntry):
@@ -354,7 +354,8 @@ class RedisScheduler(Scheduler):
                     time.sleep(5 - t_s)
                 self.rdb.incr('crontask-{}-generation'.format(entry.name))
 
-        result = super(RedisScheduler, self).apply_async(entry, publisher, **kwargs)
+        result = super(RedisScheduler, self).apply_async(
+            entry, producer=None, advance=True, **kwargs)
         if callback:
             result.then(callback, callback)
         return result
