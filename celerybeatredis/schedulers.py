@@ -355,7 +355,7 @@ class RedisScheduler(Scheduler):
                 self.rdb.incr('crontask-{}-generation'.format(entry.name))
 
         result = super(RedisScheduler, self).apply_async(
-            entry, producer=None, advance=True, **kwargs)
+            entry, producer=producer, advance=advance, **kwargs)
         if callback:
             result.then(callback, callback)
         return result
