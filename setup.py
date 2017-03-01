@@ -20,7 +20,7 @@ setup(
     install_requires=[
         'setuptools',
         'redis>=2.10.3, <3.0.0a0',
-        'celery>=4.0.0, <5.0.0a0'
+        'celery>=3.1.16, <4.0.0a0'
     ]
 
 )
