@@ -265,12 +265,10 @@ class RedisScheduler(Scheduler):
 
     @catch_errors
     def setup_schedule(self):
-        logger.info('Setup schedule called')
         super(RedisScheduler, self).setup_schedule()
         # In case we have a preconfigured schedule
         self.update_from_dict(self.app.conf.CELERYBEAT_SCHEDULE)
         prefix = current_app.conf.CELERY_REDIS_SCHEDULER_KEY_PREFIX
-        logger.info('Celery Schedule is {}'.format(self.app.conf.CELERYBEAT_SCHEDULE))
         for name in self.app.conf.CELERYBEAT_SCHEDULE:
             key = '{}{}'.format(prefix, name)
             try:
@@ -293,7 +291,6 @@ class RedisScheduler(Scheduler):
         # need to grab all data (might have been updated) from schedule DB.
         # we need to merge it with whatever schedule was set in config, and already
         # installed default tasks
-        logger.info('Tick!')
         try:
             s = self.all_as_schedule()
             self.merge_inplace(s)
@@ -304,8 +301,8 @@ class RedisScheduler(Scheduler):
             # TODO : atomic merge : be able to cancel it if there s a problem
             raise
 
-        # displaying the schedule we got from redis
-        logger.debug("DB schedule : {0}".format(self.schedule))
+        # # displaying the schedule we got from redis
+        # logger.debug("DB schedule : {0}".format(self.schedule))
 
         # this will call self.maybe_due() to check if any entry is due.
         return super(RedisScheduler, self).tick()
@@ -369,7 +366,7 @@ class RedisScheduler(Scheduler):
         result = super(RedisScheduler, self).apply_async(
             entry, producer=producer, advance=advance, **kwargs)
         if callback:
-            logger.info('Attaching callback for {}'.format(entry.name))
+            logger.info('Attaching callback thread for {}'.format(entry.name))
             t = threading.Thread(target=callback)
             t.start()
         return result
