@@ -6,6 +6,7 @@
 # of the License at http://www.apache.org/licenses/LICENSE-2.0
 import datetime
 import logging
+import time
 import uuid
 
 import redis.exceptions
@@ -318,17 +319,21 @@ class RedisScheduler(Scheduler):
     def reserve(self, entry):
         # called when the task is about to be run
         # (and data will be modified -> sync() will need to save it)
+
+        new_entry = super(RedisScheduler, self).reserve(entry)
+        # Need to store the key of the entry, because the entry may change in the mean time.
+        self._dirty.add(new_entry.name)
+        return new_entry
+
+    def apply_async(self, entry, publisher=None, **kwargs):
         singleton = False
+        callback = None
         if isinstance(entry, RedisScheduleEntry):
             singleton = entry.singleton
 
-        logger.debug('RESERVE FROM {} ({})'.format(entry, type(entry)))
-        new_entry = super(RedisScheduler, self).reserve(entry)
-        logger.debug('RESERVE! {} -> {} ({}) of singleton {}'.format(
-            self, new_entry, type(entry), singleton))
-
         if singleton:
             logger.info('Attempting to secure an exclusive lock for {}'.format(entry))
+
             generation = self.rdb.get('crontask-{}-generation'.format(entry.name)) or 0
             seed = uuid.uuid4().hex
             key = 'crontask-instance-{}-{}'.format(entry.name, generation)
@@ -338,13 +343,21 @@ class RedisScheduler(Scheduler):
             if value != seed:
                 logger.info('Unable to secure {} (Gen {}) as {} != {}'.format(
                     entry, generation, seed, value))
-                return None
-            logger.info('Running {} (Gen {})'.format(entry.name, generation))
-            self.rdb.incr('crontask-{}-generation'.format(entry.name))
+                raise ValueError('Nothing to do!')
 
-        # Need to store the key of the entry, because the entry may change in the mean time.
-        self._dirty.add(new_entry.name)
-        return new_entry
+            logger.info('Running {} (Gen {})'.format(entry.name, generation))
+            t_s = time.time()
+
+            def callback(*args, **kwargs):
+                logger.error('Error on running task {}'.format(entry.name))
+                if 0.1 < time.time() - t_s < 5:
+                    time.sleep(5 - t_s)
+                self.rdb.incr('crontask-{}-generation'.format(entry.name))
+
+        result = super(RedisScheduler, self).apply_async(entry, publisher, **kwargs)
+        if callback:
+            result.then(callback, callback)
+        return result
 
     @catch_errors
     def sync(self):
