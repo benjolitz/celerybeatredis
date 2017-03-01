@@ -357,6 +357,7 @@ class RedisScheduler(Scheduler):
         result = super(RedisScheduler, self).apply_async(
             entry, producer=producer, advance=advance, **kwargs)
         if callback:
+            logger.info('Attaching callback for {}'.format(entry.name))
             result.then(callback)
         return result
 
