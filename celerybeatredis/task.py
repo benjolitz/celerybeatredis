@@ -243,7 +243,8 @@ class PeriodicTask(object):
                 try:
                     schedule_inst = s(**schedule)
                 except TypeError:
-                    logger.warn("Create schedule failed. {}".format(schedule.__class__))
+                    pass
+                    # logger.warn("Create schedule failed. {}".format(schedule.__class__))
 
             if schedule_inst is None:
                 raise TaskTypeError(
