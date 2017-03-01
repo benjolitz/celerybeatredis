@@ -142,7 +142,7 @@ class PeriodicTask(object):
         for task_key in tasks:
             try:
                 value, = rdb.hmget(task_key, 'schedule')
-                logger.info('Loading {} -> {}'.format(task_key, value))
+                logger.debug('Loading {}'.format(task_key))
                 dct = json.loads(
                     bytes_to_str(value),
                     cls=DateTimeDecoder, encoding=default_encoding)

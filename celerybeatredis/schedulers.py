@@ -15,6 +15,7 @@ import celery.schedules
 import kombu.utils
 from celery import current_app
 from celery.beat import Scheduler
+from celery.result import ResultBase
 from redis import StrictRedis
 from redis.exceptions import LockError
 
@@ -25,6 +26,11 @@ from .task import PeriodicTask, catch_errors
 logger = logging.getLogger(__name__)
 
 # we don't need simplejson, builtin json module is good enough
+
+
+class EmptyResult(ResultBase):
+    task = 'Not a task'
+    id = 'faked id'
 
 
 class RedisScheduleEntry(object):
@@ -343,7 +349,7 @@ class RedisScheduler(Scheduler):
             if value != seed:
                 logger.info('Unable to secure {} (Gen {}) as {} != {}'.format(
                     entry.name, generation, seed, value))
-                raise ValueError('Nothing to do!')
+                return EmptyResult()
 
             logger.info('Running {} (Gen {})'.format(entry.name, generation))
             t_s = time.time()
