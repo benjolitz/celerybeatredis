@@ -10,10 +10,7 @@ import hashlib
 from copy import deepcopy
 import celery
 import redis.exceptions
-try:
-    import simplejson as json
-except ImportError:
-    import json
+import json
 
 from .decoder import DateTimeDecoder, DateTimeEncoder
 from .exceptions import TaskTypeError
@@ -145,6 +142,7 @@ class PeriodicTask(object):
         for task_key in tasks:
             try:
                 value, = rdb.hmget(task_key, 'schedule')
+                logger.info('Loading {} -> {}'.format(task_key, value))
                 dct = json.loads(
                     bytes_to_str(value),
                     cls=DateTimeDecoder, encoding=default_encoding)
@@ -160,10 +158,8 @@ class PeriodicTask(object):
                     rdb.delete(task_key)
                     continue
                 raise
-            except json.JSONDecodeError:  # handling bad json format by ignoring the task
-                logger.warning('ERROR Reading json task at %s', task_key)
             except ValueError:
-                logger.warning('Unable to decode data at {}. Possibly deleted'.format(task_key))
+                logger.exception('Unable to decode data at {}. Possibly deleted'.format(task_key))
 
     def _next_instance(self, last_run_at):
         self.last_run_at = last_run_at
