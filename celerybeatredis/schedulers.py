@@ -359,8 +359,9 @@ class RedisScheduler(Scheduler):
                     result.get()
                 except Exception:
                     logger.exception('Error in {}'.format(entry.name))
-                if 0.1 < time.time() - t_s < 5:
-                    time.sleep(5 - t_s)
+                elapsed = time.time() - t_s
+                if 0.1 < elapsed < 5:
+                    time.sleep(5.1 - elapsed)
                 self.rdb.incr('crontask-{}-generation'.format(entry.name))
 
         result = super(RedisScheduler, self).apply_async(
