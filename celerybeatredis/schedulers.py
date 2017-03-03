@@ -369,6 +369,7 @@ class RedisScheduler(Scheduler):
         if callback:
             logger.info('Attaching callback thread for {}'.format(entry.name))
             t = threading.Thread(target=callback, args=(result,))
+            t.daemon = True
             t.start()
         return result
 
