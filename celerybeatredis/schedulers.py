@@ -4,25 +4,25 @@
 # Licensed under the Apache License, Version 2.0 (the 'License'); you may not
 # use this file except in compliance with the License. You may obtain a copy
 # of the License at http://www.apache.org/licenses/LICENSE-2.0
+import contextlib
 import datetime
+import functools
 import logging
-import time
-import uuid
 import threading
-
-import redis.exceptions
+import time
 
 import celery.schedules
 import kombu.utils
+import redis.exceptions
 from celery import current_app
 from celery.beat import Scheduler
 from celery.result import ResultBase
 from redis import StrictRedis
-from redis.exceptions import LockError
+from redlock import Redlock, MultipleRedlockException
 
 from .exceptions import TaskTypeError
-
 from .task import PeriodicTask, catch_errors
+
 
 logger = logging.getLogger(__name__)
 
@@ -30,8 +30,33 @@ logger = logging.getLogger(__name__)
 
 
 class EmptyResult(ResultBase):
+    '''
+    Done to convince celery to not freak out
+    '''
     task = 'Not a task'
     id = 'faked id'
+
+
+@catch_errors
+def lock_task_until(name, dlm, lock, t_s, db, result):
+    logger.info('Starting singleton task thread tracking {!r} using a redis lock'.format(name))
+    try:
+        while not result.ready():
+            time.sleep(30)
+            dlm.touch(lock, 30*1000)
+    except Exception:
+        logger.exception('Error in {}'.format(name))
+    finally:
+        logger.info('Callback on {}. Took {:.2f}s'.format(name, time.time() - t_s))
+        try:
+            dlm.unlock(lock)
+        except Exception:
+            logger.exception('Unable to release lock on behalf of {!r}'.format(name))
+
+    try:
+        result.get()
+    except Exception:
+        logger.exception('Error in {}'.format(name))
 
 
 class RedisScheduleEntry(object):
@@ -223,6 +248,22 @@ class RedisScheduleEntry(object):
         return cls(PeriodicTask.from_dict(fields, scheduler_url))
 
 
+def lock_factory(dlm, name, ttl_s):
+
+    @contextlib.contextmanager
+    def lock():
+        try:
+            locked = dlm.lock(name, ttl_s*1000)
+            if locked is False:
+                raise redis.exceptions.LockError('Unable to lock')
+            yield locked
+        except MultipleRedlockException as e:
+            raise redis.exceptions.LockError(e)
+        finally:
+            dlm.unlock(locked)
+    return lock
+
+
 class RedisScheduler(Scheduler):
     Entry = RedisScheduleEntry
 
@@ -252,10 +293,10 @@ class RedisScheduler(Scheduler):
         # self.data is used for statically configured schedule
         self.schedule_url = current_app.conf.CELERY_REDIS_SCHEDULER_URL
         self.rdb = StrictRedis.from_url(self.schedule_url)
+        self.dlm = Redlock([self.rdb])
+        self._lock = functools.partial(lock_factory, 'celery:beat:task_lock',  self.lock_ttl)
         self._last_updated = None
-        self._lock_acquired = False
-        self._lock = self.rdb.lock('celery:beat:task_lock', timeout=self.lock_ttl)
-        self._lock_acquired = self._lock.acquire(blocking=False)
+
         self.Entry.scheduler = self
         self.Entry.rdb = self.rdb
 
@@ -269,19 +310,39 @@ class RedisScheduler(Scheduler):
         # In case we have a preconfigured schedule
         self.update_from_dict(self.app.conf.CELERYBEAT_SCHEDULE)
         prefix = current_app.conf.CELERY_REDIS_SCHEDULER_KEY_PREFIX
-        for name in self.app.conf.CELERYBEAT_SCHEDULE:
-            key = '{}{}'.format(prefix, name)
-            try:
-                signature = self.rdb.hget(key, 'hash')
-            except redis.exceptions.ResponseError:
-                self.rdb.delete(key)
-                signature = None
-            if signature != self.schedule[name].jsonhash():
-                logger.debug('Update/insert {} into Redis'.format(name))
-                self.rdb.hmset(key, {
-                    'hash': self.schedule[name].jsonhash(),
-                    'schedule': self.schedule[name].jsondump()
-                    })
+        signature = None
+
+        try:
+            with self._lock() as lock:
+                t_s = time.time()
+
+                if not lock:
+                    logger.debug('Unable to acquire write lock')
+                    return
+
+                for name in self.app.conf.CELERYBEAT_SCHEDULE:
+                    if time.time() - t_s >= 30:
+                        self.dlm.touch(lock, 30*1000)
+                        t_s = time.time()
+
+                    schedule_hash = self.schedule[name].jsonhash()
+
+                    key = '{}{}'.format(prefix, name)
+
+                    try:
+                        signature = self.rdb.hget(key, 'hash')
+                    except redis.exceptions.ResponseError:
+                        logger.exception('Fetching {} threw an error. Clearing it.'.format(key))
+                        self.rdb.delete(key)
+
+                    if signature != schedule_hash:
+                        logger.debug('Update/insert {} into Redis'.format(name))
+                        self.rdb.hmset(key, {
+                            'hash': schedule_hash,
+                            'schedule': self.schedule[name].jsondump()
+                            })
+        except redis.exceptions.LockError:
+            logger.exception('Unable to acquire write lock, encountered some redis errors')
 
     @catch_errors
     def tick(self):
@@ -302,7 +363,7 @@ class RedisScheduler(Scheduler):
             raise
 
         # # displaying the schedule we got from redis
-        # logger.debug("DB schedule : {0}".format(self.schedule))
+        logger.debug("DB schedule : {0}".format(self.schedule))
 
         # this will call self.maybe_due() to check if any entry is due.
         return super(RedisScheduler, self).tick()
@@ -331,78 +392,67 @@ class RedisScheduler(Scheduler):
 
     def apply_async(self, entry, producer=None, advance=True, **kwargs):
         singleton = False
-        callback = None
+
         if isinstance(entry, RedisScheduleEntry):
             singleton = entry.singleton
+        if not singleton:
+            return super(RedisScheduler, self).apply_async(
+                entry, producer=producer, advance=advance, **kwargs)
 
-        if singleton:
-            logger.info('Attempting to secure an exclusive lock for {}'.format(entry))
+        logger.info('Attempting to secure an exclusive lock for {}'.format(entry))
 
-            generation = self.rdb.get('crontask-{}-generation'.format(entry.name)) or 0
-            seed = uuid.uuid4().hex
-            key = 'crontask-instance-{}-{}'.format(entry.name, generation)
-            self.rdb.set(key, seed, ex=1*60*60*24, nx=True)  # Day timeout
-            value = self.rdb.get(key)
+        lock_name = 'crontab:meta:{}:run'.format(entry.name)
+        ctx_manager = lock_factory(lock_name,  self.lock_ttl)
+        try:
+            lock = ctx_manager.__enter__()
+        except redis.exceptions.LockError:
+            logger.debug('Unable to secure {}'.format(entry.name))
+            return EmptyResult()
 
-            if value != seed:
-                logger.debug('Unable to secure {} (Gen {}) as {} != {}'.format(
-                    entry.name, generation, seed, value))
-                return EmptyResult()
-
-            logger.info('Running {} (Gen {})'.format(entry.name, generation))
-            t_s = time.time()
-
-            @catch_errors
-            def callback(result):
-                logger.info('Callback on {}'.format(entry.name))
-                try:
-                    result.get()
-                except Exception:
-                    logger.exception('Error in {}'.format(entry.name))
-                elapsed = time.time() - t_s
-                if 0.1 < elapsed < 5:
-                    time.sleep(5.1 - elapsed)
-                self.rdb.incr('crontask-{}-generation'.format(entry.name))
+        logger.info('Running {}'.format(entry.name))
+        t_s = time.time()
 
         result = super(RedisScheduler, self).apply_async(
             entry, producer=producer, advance=advance, **kwargs)
-        if callback:
-            logger.info('Attaching callback thread for {}'.format(entry.name))
-            t = threading.Thread(target=callback, args=(result,))
-            t.daemon = True
-            t.start()
+
+        logger.info('Attaching callback thread for {}'.format(entry.name))
+        t = threading.Thread(
+            target=lock_task_until, args=(entry.name, self.dlm, lock, t_s, self.rdb, result,))
+        t.daemon = True
+        t.start()
+
         return result
 
     @catch_errors
     def sync(self):
-        logger.info('Writing modified entries...')
-        _tried = set()
+        locked = None
+        prefix = current_app.conf.CELERY_REDIS_SCHEDULER_KEY_PREFIX
         try:
+            locked = self._acquire_lock_func()
+            if not locked:
+                return
+            logger.info('Writing modified entries...')
+            _tried = set()
             while self._dirty:
                 name = self._dirty.pop()
                 _tried.add(name)
+                key = '{}{}'.format(prefix, name)
                 # Saving the entry back into Redis DB.
-                self.rdb.set(name, self.schedule[name].jsondump())
+                self.rdb.hmset(key, {
+                    'hash': self.schedule[name].jsonhash(),
+                    'schedule': self.schedule[name].jsondump()
+                    })
         except Exception as exc:
             # retry later
             self._dirty |= _tried
             logger.error('Error while sync: %r', exc, exc_info=1)
+        finally:
+            if locked:
+                self.dlm.unlock(locked)
 
     @catch_errors
     def close(self):
-        try:
-            self._lock.release()
-        except LockError:
-            pass
         self.sync()
-
-    def __del__(self):
-        # celery beat will create Scheduler twice, first time create then destroy it,
-        # so we need release lock here
-        try:
-            self._lock.release()
-        except LockError:
-            pass
 
     @property
     def info(self):
