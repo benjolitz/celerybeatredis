@@ -431,10 +431,10 @@ class RedisScheduler(Scheduler):
     @catch_errors
     def sync(self):
         prefix = current_app.conf.CELERY_REDIS_SCHEDULER_KEY_PREFIX
+        _tried = set()
         try:
             with self._secure_cronlock() as lock:
                 logger.info('Writing modified entries...')
-                _tried = set()
                 t_s = time.time()
                 while self._dirty:
                     if time.time() - t_s >= 30.:
