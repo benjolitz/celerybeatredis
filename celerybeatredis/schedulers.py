@@ -294,7 +294,8 @@ class RedisScheduler(Scheduler):
         self.schedule_url = current_app.conf.CELERY_REDIS_SCHEDULER_URL
         self.rdb = StrictRedis.from_url(self.schedule_url)
         self.dlm = Redlock([self.rdb])
-        self._lock = functools.partial(lock_factory, 'celery:beat:task_lock',  self.lock_ttl)
+        self._lock = functools.partial(
+            lock_factory, self.dlm, 'celery:beat:task_lock',  self.lock_ttl)
         self._last_updated = None
 
         self.Entry.scheduler = self
@@ -425,30 +426,33 @@ class RedisScheduler(Scheduler):
 
     @catch_errors
     def sync(self):
-        locked = None
         prefix = current_app.conf.CELERY_REDIS_SCHEDULER_KEY_PREFIX
         try:
-            locked = self._acquire_lock_func()
-            if not locked:
-                return
-            logger.info('Writing modified entries...')
-            _tried = set()
-            while self._dirty:
-                name = self._dirty.pop()
-                _tried.add(name)
-                key = '{}{}'.format(prefix, name)
-                # Saving the entry back into Redis DB.
-                self.rdb.hmset(key, {
-                    'hash': self.schedule[name].jsonhash(),
-                    'schedule': self.schedule[name].jsondump()
-                    })
+            with self._lock() as lock:
+                logger.info('Writing modified entries...')
+                _tried = set()
+                t_s = time.time()
+                while self._dirty:
+                    if time.time() - t_s >= 30.:
+                        self.dlm.touch(lock, 30*1000)
+                        t_s = time.time()
+
+                    name = self._dirty.pop()
+                    _tried.add(name)
+                    key = '{}{}'.format(prefix, name)
+                    # Saving the entry back into Redis DB.
+                    self.rdb.hmset(key, {
+                        'hash': self.schedule[name].jsonhash(),
+                        'schedule': self.schedule[name].jsondump()
+                        })
+        except redis.exceptions.LockError:
+            # retry later
+            self._dirty |= _tried
+            logger.debug('Unable to secure write lock for syncing task state')
         except Exception as exc:
             # retry later
             self._dirty |= _tried
             logger.error('Error while sync: %r', exc, exc_info=1)
-        finally:
-            if locked:
-                self.dlm.unlock(locked)
 
     @catch_errors
     def close(self):
