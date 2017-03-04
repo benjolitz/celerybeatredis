@@ -263,6 +263,8 @@ def lock_factory(dlm, name, ttl_s):
             dlm.unlock(locked)
     return lock
 
+DEFAULT_REDIS_URI = 'redis://localhost'
+
 
 class RedisScheduler(Scheduler):
     Entry = RedisScheduleEntry
@@ -272,8 +274,7 @@ class RedisScheduler(Scheduler):
             logger.info('backend scheduler using %s',
                         current_app.conf.CELERY_REDIS_SCHEDULER_URL)
         else:
-            logger.info('backend scheduler using %s',
-                        current_app.conf.CELERY_REDIS_SCHEDULER_URL)
+            logger.info('backend scheduler using %s', DEFAULT_REDIS_URI)
 
         self.update_interval = current_app.conf.get('UPDATE_INTERVAL') or datetime.timedelta(
                 seconds=10)
@@ -291,11 +292,14 @@ class RedisScheduler(Scheduler):
         self._dirty = set()  # keeping modified entries by name for sync later on
         self._schedule = {}  # keeping dynamic schedule from redis DB here
         # self.data is used for statically configured schedule
-        self.schedule_url = current_app.conf.CELERY_REDIS_SCHEDULER_URL
+        try:
+            self.schedule_url = current_app.conf.CELERY_REDIS_SCHEDULER_URL
+        except AttributeError:
+            self.schedule_url = DEFAULT_REDIS_URI
         self.rdb = StrictRedis.from_url(self.schedule_url)
         self.dlm = Redlock([self.rdb])
-        self._lock = functools.partial(
-            lock_factory, self.dlm, 'celery:beat:task_lock',  self.lock_ttl)
+        self._secure_cronlock = \
+            lock_factory(self.dlm, 'celery:beat:task_lock',  self.lock_ttl)
         self._last_updated = None
 
         self.Entry.scheduler = self
@@ -314,7 +318,7 @@ class RedisScheduler(Scheduler):
         signature = None
 
         try:
-            with self._lock() as lock:
+            with self._secure_cronlock() as lock:
                 t_s = time.time()
 
                 if not lock:
@@ -428,7 +432,7 @@ class RedisScheduler(Scheduler):
     def sync(self):
         prefix = current_app.conf.CELERY_REDIS_SCHEDULER_KEY_PREFIX
         try:
-            with self._lock() as lock:
+            with self._secure_cronlock() as lock:
                 logger.info('Writing modified entries...')
                 _tried = set()
                 t_s = time.time()
