@@ -443,7 +443,9 @@ class RedisScheduler(Scheduler):
 
                     name = self._dirty.pop()
                     _tried.add(name)
-                    key = '{}{}'.format(prefix, name)
+                    key = name
+                    if not key.startswith(prefix):
+                        key = '{}{}'.format(prefix, name)
                     # Saving the entry back into Redis DB.
                     self.rdb.hmset(key, {
                         'hash': self.schedule[name].jsonhash(),
