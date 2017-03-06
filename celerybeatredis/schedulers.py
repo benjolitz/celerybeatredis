@@ -252,6 +252,7 @@ def lock_factory(dlm, name, ttl_s):
 
     @contextlib.contextmanager
     def lock():
+        locked = False
         try:
             locked = dlm.lock(name, ttl_s*1000)
             if locked is False:
@@ -260,7 +261,8 @@ def lock_factory(dlm, name, ttl_s):
         except MultipleRedlockException as e:
             raise redis.exceptions.LockError(e)
         finally:
-            dlm.unlock(locked)
+            if locked is not False:
+                dlm.unlock(locked)
     return lock
 
 DEFAULT_REDIS_URI = 'redis://localhost'
