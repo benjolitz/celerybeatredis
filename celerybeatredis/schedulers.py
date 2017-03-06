@@ -409,7 +409,7 @@ class RedisScheduler(Scheduler):
         logger.info('Attempting to secure an exclusive lock for {}'.format(entry))
 
         lock_name = 'crontab:meta:{}:run'.format(entry.name)
-        ctx_manager = lock_factory(self.dlm, lock_name,  self.lock_ttl)
+        ctx_manager = lock_factory(self.dlm, lock_name,  self.lock_ttl)()
         try:
             lock = ctx_manager.__enter__()
         except redis.exceptions.LockError:
