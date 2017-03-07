@@ -18,7 +18,7 @@ from celery import current_app
 from celery.beat import Scheduler
 from celery.result import ResultBase
 from redis import StrictRedis
-from redlock import Redlock, MultipleRedlockException
+from redlock import Redlock, MultipleRedlockException, Lock
 
 from .exceptions import TaskTypeError
 from .task import PeriodicTask, catch_errors
@@ -412,8 +412,15 @@ class RedisScheduler(Scheduler):
         ctx_manager = lock_factory(self.dlm, lock_name,  self.lock_ttl)()
         try:
             lock = ctx_manager.__enter__()
+            if lock is False:
+                logger.debug('Unable to secure {}'.format(entry.name))
+                return EmptyResult()
+            assert isinstance(lock, Lock)
         except redis.exceptions.LockError:
             logger.debug('Unable to secure {}'.format(entry.name))
+            return EmptyResult()
+        except Exception:
+            logger.exception('Error in lock secure')
             return EmptyResult()
 
         logger.info('Running {}'.format(entry.name))
