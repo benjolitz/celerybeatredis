@@ -324,14 +324,17 @@ class RedisScheduler(Scheduler):
     def setup_schedule(self):
         super(RedisScheduler, self).setup_schedule()
         # In case we have a preconfigured schedule
-        self.update_from_dict(self.app.conf.CELERYBEAT_SCHEDULE)
+        # self.update_from_dict(self.app.conf.CELERYBEAT_SCHEDULE)
 
         prefix = current_app.conf.CELERY_REDIS_SCHEDULER_KEY_PREFIX
         signature = None
         deferreds = []
-        for name in self.app.conf.CELERYBEAT_SCHEDULE:
 
-            schedule_hash = self.schedule[name].jsonhash()
+        for name, entry in self.app.conf.CELERYBEAT_SCHEDULE.items():
+            entry = self._maybe_entry(name, entry)
+            logger.debug('{} -> {}'.format(name, entry.jsondump()))
+
+            schedule_hash = entry.jsonhash()
             key = name
             if not name.startswith(prefix):
                 key = '{}{}'.format(prefix, name)
@@ -346,7 +349,7 @@ class RedisScheduler(Scheduler):
                 self.rdb.delete(key)
                 deferreds.append((key, {
                     'hash': schedule_hash,
-                    'schedule': self.schedule[name].jsondump()
+                    'schedule': entry.jsondump()
                     }))
 
         if deferreds:
@@ -372,6 +375,7 @@ class RedisScheduler(Scheduler):
                     self.merge_inplace(s)
                 except Exception:
                     logger.exception('Unable to merge in place')
+        self.update_from_dict(self.app.conf.CELERYBEAT_SCHEDULE)
 
     @catch_errors
     def tick(self):
