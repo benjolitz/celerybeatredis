@@ -8,10 +8,13 @@ def patch_redlock():
     from redlock import Redlock
 
     def touch(self, lock, ttl):
+        if not isinstance(ttl, float):
+            ttl = float(ttl)
+        new_ttle = int(ttl/1000) or 10
         key = lock.resource
         for server in self.servers:
             try:
-                server.expire(key, int(ttl/1000))
+                server.expire(key, new_ttle)
             except:
                 pass
 

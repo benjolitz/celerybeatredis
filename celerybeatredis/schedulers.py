@@ -42,9 +42,11 @@ def lock_task_until(name, dlm, lock, t_s, db, result):
     logger.info('Starting singleton task thread tracking {!r} using a redis lock {} ({})'.format(
         name, lock.resource, lock.key))
     try:
+        time.sleep(30)
         while not result.ready():
-            time.sleep(30)
             dlm.touch(lock, 30*1000)
+            time.sleep(30)
+
     except Exception:
         logger.exception('Error in {}'.format(name))
     finally:
