@@ -3,6 +3,10 @@ from __future__ import absolute_import
 from .task import PeriodicTask, Crontab, Interval
 from .schedulers import RedisScheduler, RedisScheduleEntry
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 
 def patch_redlock():
     from redlock import Redlock
@@ -16,6 +20,7 @@ def patch_redlock():
             try:
                 server.expire(key, new_ttle)
             except:
+                logger.exception('Unable to extend!')
                 pass
 
     Redlock.touch = touch
