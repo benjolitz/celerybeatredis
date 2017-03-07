@@ -341,6 +341,7 @@ class RedisScheduler(Scheduler):
                 signature = None
 
             if signature != schedule_hash:
+                self.rdb.delete(key)
                 deferreds.append((key, {
                     'hash': schedule_hash,
                     'schedule': self.schedule[name].jsondump()
