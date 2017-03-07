@@ -38,7 +38,7 @@ class EmptyResult(ResultBase):
 
 
 @catch_errors
-def lock_task_until(name, dlm, lock, t_s, db, result):
+def lock_task_until(name, dlm, lock, t_s, db, result, after_func):
     logger.info('Starting singleton task thread tracking {!r} using a redis lock {} ({})'.format(
         name, lock.resource, lock.key))
     try:
@@ -53,8 +53,8 @@ def lock_task_until(name, dlm, lock, t_s, db, result):
         logger.info('Callback on {}. Took {:.2f}s'.format(name, time.time() - t_s))
         try:
             logger.info('Releasing Task {} lock'.format(name))
-            time.sleep(300)
             dlm.unlock(lock)
+            after_func()
         except Exception:
             logger.exception('Unable to release lock on behalf of {!r}'.format(name))
 
@@ -429,12 +429,19 @@ class RedisScheduler(Scheduler):
         if isinstance(entry, RedisScheduleEntry):
             singleton = entry.singleton
         if not singleton:
+            logger.debug('Not a singleton')
             return super(RedisScheduler, self).apply_async(
                 entry, producer=producer, advance=advance, **kwargs)
 
         logger.info('Attempting to secure an exclusive lock for {}'.format(entry))
 
         lock_name = '{}:run'.format(entry.name)
+        current_generation = self.rdb.get(lock_name + ':last_generation') or 0
+
+        next_generation = self.rdb.get(lock_name+':generation:'+str(current_generation+1))
+        if next_generation:
+            return EmptyResult()
+
         ctx_manager = lock_factory(self.dlm, lock_name,  5*60)()
         try:
             lock = ctx_manager.__enter__()
@@ -446,6 +453,7 @@ class RedisScheduler(Scheduler):
             if key != lock.key:
                 logger.warning('Invalid RedLock! {} != {}'.format(key, lock.key))
                 return EmptyResult()
+            self.rdb.incr(lock_name+':proposed_generation')
 
         except redis.exceptions.LockError:
             logger.debug('Unable to secure {}'.format(entry.name))
@@ -465,7 +473,10 @@ class RedisScheduler(Scheduler):
 
         logger.info('Attaching callback thread for {}'.format(entry.name))
         t = threading.Thread(
-            target=lock_task_until, args=(entry.name, self.dlm, lock, t_s, self.rdb, result,))
+            target=lock_task_until, args=(
+                entry.name, self.dlm, lock, t_s, self.rdb, result,
+                lambda: self.rdb.set(
+                    lock_name+':generation:'+str(current_generation+1), t_s, ex=1*12*60*60)))
         t.daemon = True
         t.start()
 
