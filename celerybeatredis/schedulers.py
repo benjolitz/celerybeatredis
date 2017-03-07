@@ -39,7 +39,7 @@ class EmptyResult(ResultBase):
 
 @catch_errors
 def lock_task_until(name, dlm, lock, t_s, db, result):
-    logger.info('Starting singleton task thread tracking {!r} using a redis lock'.format(
+    logger.info('Starting singleton task thread tracking {!r} using a redis lock {}'.format(
         name, lock.key))
     try:
         while not result.ready():
