@@ -44,6 +44,7 @@ def lock_task_until(name, dlm, lock, t_s, db, result):
     try:
         time.sleep(30)
         while not result.ready():
+            logger.debug('Refresh token {!r}'.format(lock.resource))
             dlm.touch(lock, 30*1000)
             time.sleep(30)
 
