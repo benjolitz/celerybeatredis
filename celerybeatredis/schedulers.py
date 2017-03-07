@@ -324,7 +324,7 @@ class RedisScheduler(Scheduler):
     def setup_schedule(self):
         super(RedisScheduler, self).setup_schedule()
         # In case we have a preconfigured schedule
-        # self.update_from_dict(self.app.conf.CELERYBEAT_SCHEDULE)
+        self.update_from_dict(self.app.conf.CELERYBEAT_SCHEDULE)
 
         prefix = current_app.conf.CELERY_REDIS_SCHEDULER_KEY_PREFIX
         signature = None
@@ -365,6 +365,12 @@ class RedisScheduler(Scheduler):
 
             except redis.exceptions.LockError:
                 logger.exception('Unable to acquire write lock, encountered some redis errors')
+            else:
+                try:
+                    s = self.all_as_schedule()
+                    self.merge_inplace(s)
+                except Exception:
+                    logger.exception('Unable to merge in place')
 
     @catch_errors
     def tick(self):
