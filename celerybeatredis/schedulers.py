@@ -468,7 +468,7 @@ class RedisScheduler(Scheduler):
                 t_s = time.time()
                 while self._dirty:
                     if time.time() - t_s >= 30.:
-                        self.dlm.touch(lock, 30*1000)
+                        self.dlm.touch(lock, 60*1000)
                         t_s = time.time()
 
                     name = self._dirty.pop()
