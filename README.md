@@ -8,6 +8,10 @@ This project has been forked off and will have bugfixes necessary for continued 
 
 I've suspended work on this pending a direction on how to handle ensuring singleton tasks across a distributed cluster while keeping the Celery interface intact. It is not enough that the schedulers run -- I need them to either negotiate who runs what (and rebalance on topology changes) or preallocate time periods in Redis to prevent double runs.
 
+As I attempted to use a RedLock and a taint to prevent double runs, I learned that any suspended thread in Celery that blocks long enough for the task to timeout can still cause trouble. When you have >60 workers, you can get disappointment ranging from 3 to 19 issues of "I blocked long enough to screw you".
+
+So the fundamental architecture is at question. We can either plan things out in Time (via preallocating the time segments as a "use once" setup) or in Space (which node thinks it has exclusive control over what and have the other watch it).
+
 # celerybeat-redis
 
 It's modified from celerybeat-mongo (https://github.com/zakird/celerybeat-mongo)
