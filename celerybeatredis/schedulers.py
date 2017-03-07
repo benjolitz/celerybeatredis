@@ -39,8 +39,8 @@ class EmptyResult(ResultBase):
 
 @catch_errors
 def lock_task_until(name, dlm, lock, t_s, db, result):
-    logger.info('Starting singleton task thread tracking {!r} using a redis lock {}'.format(
-        name, lock.key))
+    logger.info('Starting singleton task thread tracking {!r} using a redis lock {} ({})'.format(
+        name, lock.resource, lock.key))
     try:
         while not result.ready():
             time.sleep(30)
@@ -50,6 +50,7 @@ def lock_task_until(name, dlm, lock, t_s, db, result):
     finally:
         logger.info('Callback on {}. Took {:.2f}s'.format(name, time.time() - t_s))
         try:
+            time.sleep(30)
             dlm.unlock(lock)
         except Exception:
             logger.exception('Unable to release lock on behalf of {!r}'.format(name))
