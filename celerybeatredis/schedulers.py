@@ -268,7 +268,7 @@ def lock_factory(dlm, name, ttl_s):
             raise redis.exceptions.LockError(e)
         finally:
             if locked is not False:
-                logger.info('Releasing {}'.format(lock.resource))
+                logger.info('Releasing {}'.format(locked.resource))
                 dlm.unlock(locked)
     return lock
 
