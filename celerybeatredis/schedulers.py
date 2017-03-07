@@ -42,18 +42,17 @@ def lock_task_until(name, dlm, lock, t_s, db, result):
     logger.info('Starting singleton task thread tracking {!r} using a redis lock {} ({})'.format(
         name, lock.resource, lock.key))
     try:
-        time.sleep(30)
         while not result.ready():
             logger.info('Refresh token {!r}'.format(lock.resource))
-            dlm.touch(lock, 30*1000)
-            time.sleep(30)
+            dlm.touch(lock, 4*60*1000)
+            time.sleep(4*60)
 
     except Exception:
         logger.exception('Error in {}'.format(name))
     finally:
         logger.info('Callback on {}. Took {:.2f}s'.format(name, time.time() - t_s))
         try:
-            time.sleep(300)
+            time.sleep(60)
             dlm.unlock(lock)
         except Exception:
             logger.exception('Unable to release lock on behalf of {!r}'.format(name))
