@@ -3,6 +3,9 @@ from __future__ import absolute_import
 from .task import PeriodicTask, Crontab, Interval
 from .schedulers import RedisScheduler, RedisScheduleEntry
 
+import threading
+import uuid
+import os
 import logging
 
 logger = logging.getLogger(__name__)
@@ -22,6 +25,10 @@ def patch_redlock():
             except:
                 logger.exception('Unable to extend!')
                 pass
+
+    def get_unique_id(self):
+        return '{}-{}-{}'.format(uuid.uuid4().hex, os.getpid(), threading.currentThread().ident)
+    Redlock.get_unique_id = get_unique_id
 
     Redlock.touch = touch
 
