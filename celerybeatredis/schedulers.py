@@ -423,7 +423,7 @@ class RedisScheduler(Scheduler):
         self._dirty.add(new_entry.name)
         return new_entry
 
-    def apply_async(self, entry, producer=None, advance=True, **kwargs):
+    def apply_async(self, entry, publisher=None, **kwargs):
         singleton = False
 
         if isinstance(entry, RedisScheduleEntry):
@@ -431,15 +431,13 @@ class RedisScheduler(Scheduler):
         if not singleton:
             logger.debug('Not a singleton')
             return super(RedisScheduler, self).apply_async(
-                entry, producer=producer, advance=advance, **kwargs)
+                entry, entry, publisher=publisher, **kwargs)
 
         logger.info('Attempting to secure an exclusive lock for {}'.format(entry))
-
         lock_name = '{}:run'.format(entry.name)
-        current_generation = self.rdb.get(lock_name + ':last_generation') or 0
 
-        next_generation = self.rdb.get(lock_name+':generation:'+str(current_generation+1))
-        if next_generation:
+        if self.rdb.get(lock_name + ':taint'):
+            logger.warning('Taint found for {}'.format(entry.name))
             return EmptyResult()
 
         ctx_manager = lock_factory(self.dlm, lock_name,  5*60)()
@@ -448,16 +446,11 @@ class RedisScheduler(Scheduler):
             if lock is False:
                 logger.debug('Unable to secure {}'.format(entry.name))
                 return EmptyResult()
-            assert isinstance(lock, Lock) and lock.validity > 10000
-            key = self.rdb.get(lock.resource)
-            if key != lock.key:
-                logger.warning('Invalid RedLock! {} != {}'.format(key, lock.key))
-                return EmptyResult()
-            self.rdb.incr(lock_name+':proposed_generation')
 
         except redis.exceptions.LockError:
             logger.debug('Unable to secure {}'.format(entry.name))
             return EmptyResult()
+
         except Exception:
             logger.exception('Error in lock secure')
             return EmptyResult()
@@ -469,14 +462,13 @@ class RedisScheduler(Scheduler):
         assert self.rdb.get(lock.resource), 'Lock {} never materialized'.format(lock.resource)
         assert ttl > 120, 'Lock {} never materialized with a bad ttl {}'.format(lock.resource, ttl)
         result = super(RedisScheduler, self).apply_async(
-            entry, producer=producer, advance=advance, **kwargs)
+            entry, producer=publisher, **kwargs)
 
         logger.info('Attaching callback thread for {}'.format(entry.name))
         t = threading.Thread(
             target=lock_task_until, args=(
                 entry.name, self.dlm, lock, t_s, self.rdb, result,
-                lambda: self.rdb.set(
-                    lock_name+':generation:'+str(current_generation+1), t_s, ex=1*12*60*60)))
+                lambda: self.rdb.set(lock_name+':taint', t_s, ex=120)))
         t.daemon = True
         t.start()
 
