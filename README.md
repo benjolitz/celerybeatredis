@@ -2,11 +2,11 @@
 
 This project has been forked off and will have bugfixes necessary for continued use in a Celery 3.x cluster.
 
+
+
 # Project Status
 
-Because of the busy of work, I doesn't got much time on this time, and one major reason is now I am programming with Java...
-So I won't push any new release from now on, if someone is interest with it, just fork and maintenance your own version,
-Sorry for the inconvenient.
+I've suspended work on this pending a direction on how to handle ensuring singleton tasks across a distributed cluster while keeping the Celery interface intact. It is not enough that the schedulers run -- I need them to either negotiate who runs what (and rebalance on topology changes) or preallocate time periods in Redis to prevent double runs.
 
 # celerybeat-redis
 
