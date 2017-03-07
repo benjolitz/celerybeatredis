@@ -52,7 +52,8 @@ def lock_task_until(name, dlm, lock, t_s, db, result):
     finally:
         logger.info('Callback on {}. Took {:.2f}s'.format(name, time.time() - t_s))
         try:
-            time.sleep(60)
+            logger.info('Releasing Task {} lock'.format(name))
+            time.sleep(300)
             dlm.unlock(lock)
         except Exception:
             logger.exception('Unable to release lock on behalf of {!r}'.format(name))
@@ -266,6 +267,7 @@ def lock_factory(dlm, name, ttl_s):
             raise redis.exceptions.LockError(e)
         finally:
             if locked is not False:
+                logger.info('Releasing {}'.format(lock.resource))
                 dlm.unlock(locked)
     return lock
 
@@ -432,7 +434,7 @@ class RedisScheduler(Scheduler):
         ttl = self.rdb.ttl(lock.resource)
 
         assert self.rdb.get(lock.resource), 'Lock {} never materialized'.format(lock.resource)
-        assert ttl > 60, 'Lock {} never materialized with a bad ttl {}'.format(lock.resource, ttl)
+        assert ttl > 120, 'Lock {} never materialized with a bad ttl {}'.format(lock.resource, ttl)
         result = super(RedisScheduler, self).apply_async(
             entry, producer=producer, advance=advance, **kwargs)
 
