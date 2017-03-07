@@ -327,38 +327,42 @@ class RedisScheduler(Scheduler):
         self.update_from_dict(self.app.conf.CELERYBEAT_SCHEDULE)
         prefix = current_app.conf.CELERY_REDIS_SCHEDULER_KEY_PREFIX
         signature = None
+        deferreds = []
+        for name in self.app.conf.CELERYBEAT_SCHEDULE:
 
-        try:
-            with self._secure_cronlock() as lock:
-                t_s = time.time()
+            schedule_hash = self.schedule[name].jsonhash()
 
-                if not lock:
-                    logger.debug('Unable to acquire write lock')
-                    return
+            key = '{}{}'.format(prefix, name)
 
-                for name in self.app.conf.CELERYBEAT_SCHEDULE:
-                    if time.time() - t_s >= 30:
-                        self.dlm.touch(lock, 30*1000)
-                        t_s = time.time()
+            try:
+                signature = self.rdb.hget(key, 'hash')
+            except redis.exceptions.ResponseError:
+                logger.exception('Fetching {} threw an error. Clearing it.'.format(key))
+                signature = None
 
-                    schedule_hash = self.schedule[name].jsonhash()
+            if signature != schedule_hash:
+                deferreds.append((key, {
+                    'hash': schedule_hash,
+                    'schedule': self.schedule[name].jsondump()
+                    }))
 
-                    key = '{}{}'.format(prefix, name)
+        if deferreds:
+            try:
+                with self._secure_cronlock() as lock:
+                    t_s = time.time()
 
-                    try:
-                        signature = self.rdb.hget(key, 'hash')
-                    except redis.exceptions.ResponseError:
-                        logger.exception('Fetching {} threw an error. Clearing it.'.format(key))
-                        self.rdb.delete(key)
+                    if not lock:
+                        logger.debug('Unable to acquire write lock')
+                        return
+                    for key, value in deferreds:
+                        if time.time() - t_s >= 30:
+                            self.dlm.touch(lock, 60*1000)
+                            t_s = time.time()
+                        logger.debug('Update/insert {} into Redis'.format(key))
+                        self.rdb.hmset(key, value)
 
-                    if signature != schedule_hash:
-                        logger.debug('Update/insert {} into Redis'.format(name))
-                        self.rdb.hmset(key, {
-                            'hash': schedule_hash,
-                            'schedule': self.schedule[name].jsondump()
-                            })
-        except redis.exceptions.LockError:
-            logger.exception('Unable to acquire write lock, encountered some redis errors')
+            except redis.exceptions.LockError:
+                logger.exception('Unable to acquire write lock, encountered some redis errors')
 
     @catch_errors
     def tick(self):

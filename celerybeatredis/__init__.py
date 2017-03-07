@@ -28,6 +28,7 @@ def patch_redlock():
 
     def get_unique_id(self):
         return '{}-{}-{}'.format(uuid.uuid4().hex, os.getpid(), threading.currentThread().ident)
+
     Redlock.get_unique_id = get_unique_id
 
     Redlock.touch = touch
