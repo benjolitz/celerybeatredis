@@ -430,8 +430,9 @@ class RedisScheduler(Scheduler):
                 return EmptyResult()
             assert isinstance(lock, Lock) and lock.validity > 10000
             key = self.rdb.get(lock.resource)
-            if key == lock.key:
-                raise ValueError('{} != {}'.format(key, lock.key))
+            if key != lock.key:
+                logger.warning('Invalid RedLock! {} != {}'.format(key, lock.key))
+                return EmptyResult()
 
         except redis.exceptions.LockError:
             logger.debug('Unable to secure {}'.format(entry.name))
