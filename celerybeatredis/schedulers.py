@@ -430,8 +430,10 @@ class RedisScheduler(Scheduler):
 
         logger.info('Running {}'.format(entry.name))
         t_s = time.time()
+        ttl = self.rdb.ttl(lock.resource)
 
         assert self.rdb.get(lock.resource), 'Lock {} never materialized'.format(lock.resource)
+        assert ttl > 60, 'Lock {} never materialized with a bad ttl {}'.format(lock.resource, ttl)
         result = super(RedisScheduler, self).apply_async(
             entry, producer=producer, advance=advance, **kwargs)
 
