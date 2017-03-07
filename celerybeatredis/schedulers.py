@@ -332,8 +332,9 @@ class RedisScheduler(Scheduler):
         for name in self.app.conf.CELERYBEAT_SCHEDULE:
 
             schedule_hash = self.schedule[name].jsonhash()
-
-            key = '{}{}'.format(prefix, name)
+            key = name
+            if not name.startswith(prefix):
+                key = '{}{}'.format(prefix, name)
 
             try:
                 signature = self.rdb.hget(key, 'hash')
@@ -360,7 +361,7 @@ class RedisScheduler(Scheduler):
                         if time.time() - t_s >= 30:
                             self.dlm.touch(lock, 60*1000)
                             t_s = time.time()
-                        logger.debug('Update/insert {} into Redis'.format(key))
+                        logger.debug('Update/insert {} into Redis -> {}'.format(key, value))
                         self.rdb.hmset(key, value)
 
             except redis.exceptions.LockError:
