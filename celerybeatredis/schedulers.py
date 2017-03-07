@@ -44,7 +44,7 @@ def lock_task_until(name, dlm, lock, t_s, db, result):
     try:
         time.sleep(30)
         while not result.ready():
-            logger.debug('Refresh token {!r}'.format(lock.resource))
+            logger.info('Refresh token {!r}'.format(lock.resource))
             dlm.touch(lock, 30*1000)
             time.sleep(30)
 
@@ -431,6 +431,7 @@ class RedisScheduler(Scheduler):
         logger.info('Running {}'.format(entry.name))
         t_s = time.time()
 
+        assert self.rdb.get(lock.resource), 'Lock {} never materialized'.format(lock.resource)
         result = super(RedisScheduler, self).apply_async(
             entry, producer=producer, advance=advance, **kwargs)
 
