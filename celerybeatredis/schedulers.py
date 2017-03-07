@@ -259,8 +259,9 @@ def lock_factory(dlm, name, ttl_s):
     def lock():
         locked = False
         try:
+            logger.info('Secure lock for {} with a ttl of {}'.format(name, ttl_s))
             locked = dlm.lock(name, ttl_s*1000)
-            if locked is False:
+            if not isinstance(locked, Lock):
                 raise redis.exceptions.LockError('Unable to lock')
             yield locked
         except MultipleRedlockException as e:
@@ -416,14 +417,15 @@ class RedisScheduler(Scheduler):
 
         logger.info('Attempting to secure an exclusive lock for {}'.format(entry))
 
-        lock_name = 'crontab:meta:{}:run'.format(entry.name)
+        lock_name = '{}:run'.format(entry.name)
         ctx_manager = lock_factory(self.dlm, lock_name,  5*60)()
         try:
             lock = ctx_manager.__enter__()
             if lock is False:
                 logger.debug('Unable to secure {}'.format(entry.name))
                 return EmptyResult()
-            assert isinstance(lock, Lock)
+            assert isinstance(lock, Lock) and lock.validity > 10000
+
         except redis.exceptions.LockError:
             logger.debug('Unable to secure {}'.format(entry.name))
             return EmptyResult()
