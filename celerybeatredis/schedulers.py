@@ -425,6 +425,8 @@ class RedisScheduler(Scheduler):
                 logger.debug('Unable to secure {}'.format(entry.name))
                 return EmptyResult()
             assert isinstance(lock, Lock) and lock.validity > 10000
+            key = self.rdb.get(lock.resource)
+            assert key == lock.key, '{} != {}'.format(key, lock.key)
 
         except redis.exceptions.LockError:
             logger.debug('Unable to secure {}'.format(entry.name))
