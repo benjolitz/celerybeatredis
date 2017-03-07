@@ -304,7 +304,9 @@ class RedisScheduler(Scheduler):
             self.schedule_url = current_app.conf.CELERY_REDIS_SCHEDULER_URL
         except AttributeError:
             self.schedule_url = DEFAULT_REDIS_URI
+
         self.rdb = StrictRedis.from_url(self.schedule_url)
+        logger.info('Setting RedLock provider to {}'.format(self.schedule_url))
         self.dlm = Redlock([self.rdb])
         self._secure_cronlock = \
             lock_factory(self.dlm, 'celery:beat:task_lock',  self.lock_ttl)
