@@ -50,7 +50,7 @@ def lock_task_until(name, dlm, lock, t_s, db, result):
     finally:
         logger.info('Callback on {}. Took {:.2f}s'.format(name, time.time() - t_s))
         try:
-            time.sleep(30)
+            time.sleep(300)
             dlm.unlock(lock)
         except Exception:
             logger.exception('Unable to release lock on behalf of {!r}'.format(name))
